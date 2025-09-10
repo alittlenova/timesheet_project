@@ -25,7 +25,8 @@ type Me = {
 
 type Department = { id: number; name: string };
 
-const api = axios.create({ baseURL: "http://localhost:8000" });
+//const api = axios.create({ baseURL: "http://localhost:8000" });
+const api = axios.create({ baseURL: "http://49.235.107.96:8000" });
 
 /** 行组件：每个待审批用户一行（把 hooks 放进子组件，避免在 map 中直接用 hooks） */
 function PendingRow(props: {
