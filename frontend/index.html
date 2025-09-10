@@ -8,10 +8,37 @@
   <body>
     <div id="root"></div>
 
-    <!-- 先加载补丁，拦截所有 fetch / XHR -->
-    <script src="/rewrite-api.js"></script>
+    <!-- 内联补丁：把 http://localhost:8000/... 统一改成 /api/... -->
+    <script>
+      (function () {
+        const PATTERNS = [
+          /^http:\/\/localhost:8000/i,
+          /^http:\/\/127\.0\.0\.1:8000/i,
+          /^http:\/\/0\.0\.0\.0:8000/i,
+        ];
+        const toApi = (url) => {
+          try {
+            const s = String(url);
+            for (const r of PATTERNS) if (r.test(s)) return s.replace(r, '/api');
+            return s;
+          } catch { return url; }
+        };
+        const _fetch = window.fetch;
+        window.fetch = function (input, init) {
+          if (typeof input === 'string') input = toApi(input);
+          else if (input && typeof input.url === 'string') input = new Request(toApi(input.url), input);
+          return _fetch(input, init);
+        };
+        const _open = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+          return _open.call(this, method, toApi(url), ...rest);
+        };
+        window.__REWRITE_API_READY = true;
+        console.log('[rewrite-api] hooked');
+      })();
+    </script>
 
-    <!-- 再加载你的应用入口（保持你原来的路径） -->
+    <!-- 你的应用入口（保持不变） -->
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
