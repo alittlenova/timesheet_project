@@ -68,7 +68,7 @@ type Project = { id: number; name: string; status?: string };
 
 //const api = axios.create({ baseURL: "http://localhost:8000" });
 const api = axios.create({
-  baseURL: '/api',        // 关键！走同域反代
+  baseURL: 'https://wentian.wang/api',        // 关键！走同域反代
   withCredentials: true,  // 若用 Cookie 登录
   timeout: 15000,
 });
