@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>部门管理</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial; }
+    .wrap { width: 96%; margin: 20px auto; }
+    h2 { margin: 8px 0 16px; }
+    .toolbar { display:flex; gap:8px; align-items:center; margin-bottom:12px; }
+    .toolbar input[type=text]{ flex:1; padding:8px 10px; border:1px solid #ccc; border-radius:6px; }
+    .toolbar button { padding:8px 12px; cursor:pointer; border:1px solid #bbb; background:#f7f7f7; border-radius:6px; }
+
+    #err { color:#b00020; white-space:pre-wrap; font-size:12px; margin:6px 0 12px; min-height: 1em; }
+
+    .grid { display:grid; grid-template-columns: 280px 1fr; gap:16px; align-items:start; }
+    .card { border:1px solid #ddd; border-radius:8px; overflow:hidden; background:#fff; }
+    .card header { background:#f5f5f5; padding:8px 10px; font-weight:600; }
+    .card .body { padding:10px; }
+
+    .dept-list { max-height: 70vh; overflow:auto; }
+    .dept-item { display:flex; align-items:center; justify-content:space-between; padding:6px 8px; border-bottom:1px solid #eee; cursor:pointer; }
+    .dept-item.active { background:#edf6ff; }
+    .dept-item .name { flex:1; }
+    .dept-item .ops button { margin-left:6px; }
+
+    table { border-collapse:collapse; width:100%; }
+    th, td { border:1px solid #ddd; padding:8px; text-align:center; font-size:14px; }
+    th { background:#f5f5f5; position:sticky; top:0; }
+    tr:hover { background:#fafafa; }
+    .muted { color:#777; }
+
+    .picker { display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
+    .picker input[type=text] { width: 260px; padding:6px 8px; }
+    .listbox { max-height: 240px; overflow:auto; border:1px solid #ddd; border-radius:6px; padding:6px; }
+    .user-row { display:flex; align-items:center; gap:8px; padding:4px 2px; }
+    .user-row label { flex:1; text-align:left; }
+    .right-actions { display:flex; gap:8px; margin-top:8px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h2>部门管理</h2>
+
+  <div class="toolbar">
+    <input id="admin-token" type="text" placeholder="粘贴管理员 Bearer Token（可仅粘JWT或含 Bearer 前缀）">
+    <button id="save-token">保存</button>
+    <button id="refresh">刷新列表</button>
+  </div>
+  <div id="err"></div>
+
+  <div class="grid">
+    <!-- 左侧：部门列表 -->
+    <div class="card">
+      <header>部门</header>
+      <div class="body">
+        <div style="display:flex; gap:8px; margin-bottom:8px;">
+          <input id="new-dept-name" type="text" placeholder="新部门名称">
+          <button id="create-dept">新建</button>
+        </div>
+        <div id="dept-list" class="dept-list"></div>
+      </div>
+    </div>
+
+    <!-- 右侧：成员管理 -->
+    <div class="card">
+      <header id="dept-title">成员（未选择部门）</header>
+      <div class="body">
+        <div class="picker">
+          <input id="user-search" type="text" placeholder="搜索用户（按姓名/手机号/邮箱）">
+          <button id="add-selected">将勾选用户加入部门</button>
+          <button id="remove-selected">从部门移除勾选用户</button>
+        </div>
+        <div id="user-picker" class="listbox"></div>
+
+        <div class="right-actions">
+          <button id="reload-members">刷新成员</button>
+        </div>
+
+        <div style="margin-top:10px;">
+          <table id="member-table">
+            <thead>
+              <tr>
+                <th>ID</th><th>姓名</th><th>手机号</th><th>邮箱</th><th>角色</th><th>状态</th><th>操作</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ===== 配置区 =====
+  const API_BASE = location.origin;               // 如 http://localhost:8000
+  const tokenKey = 'admin_bearer_token';          // 与 users.html 相同
+  const API = {
+    listDepts:      () => `${API_BASE}/departments`,
+    createDept:     () => `${API_BASE}/departments`,
+    deleteDept:     (id) => `${API_BASE}/departments/${id}`,
+    getDept:        (id) => `${API_BASE}/departments/${id}`,
+    addMembers:     (id) => `${API_BASE}/departments/${id}/members`,
+    removeMembers:  (id) => `${API_BASE}/departments/${id}/members`,
+    listUsers:      () => `${API_BASE}/users`,
+  };
+  // ==================
+
+  // 全局状态
+  let allUsers = [];         // 全量用户缓存（用于选择器和回退过滤）
+  let departments = [];      // 部门列表
+  let currentDeptId = null;  // 当前选中部门
+  let currentMembers = [];   // 当前部门成员（User 列表）
+
+  // 错误处理
+  window.addEventListener('error', e => showErr('脚本错误：' + (e.message || e.error)));
+  window.addEventListener('unhandledrejection', e => showErr('未处理异常：' + (e.reason && e.reason.stack || e.reason)));
+
+  document.addEventListener('DOMContentLoaded', () => {
+    byId('save-token').onclick = saveToken;
+    byId('refresh').onclick = loadDepartments;
+    byId('create-dept').onclick = onCreateDept;
+    byId('reload-members').onclick = reloadMembers;
+    byId('add-selected').onclick = onAddSelected;
+    byId('remove-selected').onclick = onRemoveSelected;
+    byId('user-search').addEventListener('input', renderUserPickerFiltered);
+
+    const t = localStorage.getItem(tokenKey);
+    if (t) byId('admin-token').value = t;
+  });
+
+  function byId(id){ return document.getElementById(id); }
+  function showErr(msg){ console.error(msg); byId('err').textContent = String(msg||''); }
+  function clearErr(){ byId('err').textContent = ''; }
+
+  function getBearer(){
+    let t = (byId('admin-token').value || '').trim() || localStorage.getItem(tokenKey) || '';
+    if (!t) return '';
+    return t.startsWith('Bearer ') ? t : `Bearer ${t}`;
+  }
+  function saveToken(){
+    const raw = (byId('admin-token').value || '').trim();
+    if (!raw) return alert('请输入 token');
+    const t = raw.startsWith('Bearer ') ? raw.slice(7) : raw;
+    localStorage.setItem(tokenKey, t);
+    alert('已保存 token');
+  }
+
+  // ===== API 基础请求 =====
+  async function apiGet(url){
+    const bearer = getBearer(); if(!bearer) throw new Error('缺少管理员 token');
+    const res = await fetch(url, { headers:{'Authorization': bearer} });
+    if(!res.ok) throw new Error(`HTTP ${res.status} - ${await res.text()}`);
+    return res.json();
+  }
+  async function apiPost(url, body){
+    const bearer = getBearer(); if(!bearer) throw new Error('缺少管理员 token');
+    const res = await fetch(url, { method:'POST', headers:{'Authorization': bearer, 'Content-Type':'application/json'}, body: JSON.stringify(body||{}) });
+    if(!res.ok) throw new Error(`HTTP ${res.status} - ${await res.text()}`);
+    return res.text().catch(()=> '');
+  }
+  async function apiDelete(url, body){
+    const bearer = getBearer(); if(!bearer) throw new Error('缺少管理员 token');
+    const res = await fetch(url, { method:'DELETE', headers:{'Authorization': bearer, 'Content-Type':'application/json'}, body: body ? JSON.stringify(body): undefined });
+    if(!res.ok) throw new Error(`HTTP ${res.status} - ${await res.text()}`);
+    return res.text().catch(()=> '');
+  }
+
+  // ===== 加载部门 & 用户 =====
+  async function loadDepartments(){
+    clearErr();
+    try{
+      // 先拿用户缓存（用于选择器 & 回退过滤）
+      allUsers = await apiGet(API.listUsers());
+      departments = await apiGet(API.listDepts());
+      renderDeptList();
+      renderUserPickerFiltered();
+      // 自动选中第一个部门
+      if(departments.length && !currentDeptId){
+        onSelectDept(departments[0].id);
+      }
+    }catch(e){ showErr('加载失败：' + e.message); }
+  }
+
+  function renderDeptList(){
+    const box = byId('dept-list');
+    box.innerHTML = '';
+    if(!departments.length){
+      box.innerHTML = `<div class="muted">暂无部门</div>`;
+      return;
+    }
+    departments.forEach(d=>{
+      const row = document.createElement('div');
+      row.className = 'dept-item' + (d.id===currentDeptId?' active':'');
+      row.innerHTML = `
+        <div class="name">${escapeHtml(d.name)} (${d.id})</div>
+        <div class="ops">
+          <button onclick="onSelectDept(${d.id})">查看</button>
+          <button onclick="onDeleteDept(${d.id})">删除</button>
+        </div>
+      `;
+      row.onclick = ()=> onSelectDept(d.id);
+      box.appendChild(row);
+    });
+  }
+
+  async function onCreateDept(){
+    const name = (byId('new-dept-name').value || '').trim();
+    if(!name) return alert('请输入部门名称');
+    try{
+      await apiPost(API.createDept(), {name});
+      byId('new-dept-name').value = '';
+      await loadDepartments();
+    }catch(e){ showErr('创建部门失败：' + e.message); }
+  }
+
+  async function onDeleteDept(id){
+    if(!confirm('确认删除该部门？此操作会移除与用户的关联。')) return;
+    try{
+      await apiDelete(API.deleteDept(id));
+      if(currentDeptId === id){ currentDeptId = null; currentMembers = []; byId('dept-title').textContent = '成员（未选择部门）'; renderMemberTable(); }
+      await loadDepartments();
+    }catch(e){ showErr('删除部门失败：' + e.message); }
+  }
+
+  async function onSelectDept(id){
+    currentDeptId = id;
+    byId('dept-title').textContent = `成员（部门 #${id}）`;
+    // 获取部门详情；若无 users 字段，则用 allUsers 过滤
+    try{
+      const detail = await apiGet(API.getDept(id));
+      const membersFromDept = Array.isArray(detail.users) ? detail.users : null;
+      if(membersFromDept){
+        currentMembers = membersFromDept;
+      }else{
+        // 回退：从 allUsers 的 departments 里筛
+        currentMembers = allUsers.filter(u => Array.isArray(u.departments) && u.departments.some(d => Number(d.id) === Number(id)));
+      }
+      renderDeptList(); // 刷新激活态
+      renderMemberTable();
+      renderUserPickerFiltered(); // 更新选择器（让已在部门内的用户打上勾）
+    }catch(e){
+      showErr('加载部门详情失败：' + e.message);
+    }
+  }
+
+  async function reloadMembers(){
+    if(!currentDeptId) return showErr('请先选择部门');
+    await onSelectDept(currentDeptId);
+  }
+
+  // ===== 成员选择器 =====
+  function renderUserPickerFiltered(){
+    const keyword = (byId('user-search').value || '').trim().toLowerCase();
+    const picker = byId('user-picker');
+    picker.innerHTML = '';
+    const inDeptIds = new Set(currentMembers.map(u => Number(u.id)));
+
+    const filtered = allUsers.filter(u => {
+      if(!keyword) return true;
+      const s = `${u.id} ${u.name||''} ${u.mobile||''} ${u.phone||''} ${u.email||''}`.toLowerCase();
+      return s.includes(keyword);
+    });
+
+    if(!filtered.length){
+      picker.innerHTML = `<div class="muted">无匹配用户</div>`;
+      return;
+    }
+
+    filtered.forEach(u=>{
+      const div = document.createElement('div');
+      div.className = 'user-row';
+      const checked = inDeptIds.has(Number(u.id)) ? 'checked' : '';
+      div.innerHTML = `
+        <input type="checkbox" id="pick-${u.id}" ${checked}>
+        <label for="pick-${u.id}">#${u.id} ${escapeHtml(u.name||'')}  ${escapeHtml(u.mobile||u.phone||'')}  ${escapeHtml(u.email||'')}</label>
+      `;
+      picker.appendChild(div);
+    });
+  }
+
+  function getPickerSelections(){
+    const inputs = byId('user-picker').querySelectorAll('input[type=checkbox]');
+    const add = [], remove = [];
+    const memberIds = new Set(currentMembers.map(u => Number(u.id)));
+    inputs.forEach(inp=>{
+      const id = Number(inp.id.replace('pick-',''));
+      if(inp.checked && !memberIds.has(id)) add.push(id);
+      if(!inp.checked && memberIds.has(id)) remove.push(id);
+    });
+    return {add, remove};
+  }
+
+  async function onAddSelected(){
+    if(!currentDeptId) return showErr('请先选择部门');
+    const {add} = getPickerSelections();
+    if(!add.length) return alert('没有需要新增的用户');
+    try{
+      await apiPost(API.addMembers(currentDeptId), {user_ids: add});
+      await onSelectDept(currentDeptId);
+    }catch(e){ showErr('添加成员失败：' + e.message); }
+  }
+
+  async function onRemoveSelected(){
+    if(!currentDeptId) return showErr('请先选择部门');
+    const {remove} = getPickerSelections();
+    if(!remove.length) return alert('没有需要移除的用户');
+    try{
+      await apiDelete(API.removeMembers(currentDeptId), {user_ids: remove});
+      await onSelectDept(currentDeptId);
+    }catch(e){ showErr('移除成员失败：' + e.message); }
+  }
+
+  // ===== 成员表格 =====
+  function renderMemberTable(){
+    const tbody = document.querySelector('#member-table tbody');
+    tbody.innerHTML = '';
+    if(!currentDeptId){
+      tbody.innerHTML = `<tr><td colspan="7" class="muted">请选择左侧部门</td></tr>`;
+      return;
+    }
+    if(!currentMembers.length){
+      tbody.innerHTML = `<tr><td colspan="7" class="muted">该部门暂无成员</td></tr>`;
+      return;
+    }
+    currentMembers.forEach(u=>{
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${safe(u.id)}</td>
+        <td>${safe(u.name)}</td>
+        <td>${safe(u.mobile||u.phone)}</td>
+        <td>${safe(u.email)}</td>
+        <td>${safe(u.role)}</td>
+        <td>${safe(u.status)}</td>
+        <td><button onclick="removeSingle(${Number(u.id)})">移出</button></td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  async function removeSingle(userId){
+    if(!currentDeptId) return;
+    try{
+      await apiDelete(API.removeMembers(currentDeptId), {user_ids:[userId]});
+      await onSelectDept(currentDeptId);
+    }catch(e){ showErr('移除失败：' + e.message); }
+  }
+
+  // ===== Utils =====
+  function safe(v){ return (v===null||v===undefined)?'':String(v); }
+  function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({ '&':'&nbsp;&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+
+  // 启动时不自动加载，先让你粘 token，点“刷新列表”
+</script>
+</body>
+</html>

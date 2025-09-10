@@ -1,0 +1,51 @@
+version: "3.9"
+
+services:
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: timesheet
+      MYSQL_USER: timesheet
+      MYSQL_PASSWORD: ts_pass
+      TZ: "Asia/Shanghai"
+    ports:
+      - "3307:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql:ro
+    command:
+      - "--default-authentication-plugin=mysql_native_password"
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-prootpass"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build: .
+    # 如果你的 Dockerfile 里已经指定了 CMD/ENTRYPOINT，可删除下面的 command
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # 如果你的 .env 里已经有 DATABASE_URL，可以去掉这两行
+      DATABASE_URL: "mysql+pymysql://timesheet:ts_pass@db:3306/timesheet?charset=utf8mb4"
+      TZ: "Asia/Shanghai"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/app
+    restart: unless-stopped
+    # 仅当你需要容器内访问宿主机（例如调用宿主上的服务）时有用
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  db_data:

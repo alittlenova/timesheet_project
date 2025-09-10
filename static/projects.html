@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>项目管理</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial; }
+    .wrap { width: 96%; margin: 20px auto; }
+    h2 { margin: 8px 0 16px; }
+    .toolbar { display:flex; gap:8px; align-items:center; margin-bottom:12px; }
+    .toolbar input[type=text]{ flex:1; padding:8px 10px; border:1px solid #ccc; border-radius:6px; }
+    .toolbar button { padding:8px 12px; cursor:pointer; border:1px solid #bbb; background:#f7f7f7; border-radius:6px; }
+    #err { color:#b00020; white-space:pre-wrap; font-size:12px; margin:6px 0 12px; min-height: 1em; }
+
+    .grid { display:grid; grid-template-columns: 360px 1fr; gap:16px; align-items:start; }
+    .card { border:1px solid #ddd; border-radius:8px; overflow:hidden; background:#fff; }
+    .card header { background:#f5f5f5; padding:8px 10px; font-weight:600; }
+    .card .body { padding:10px; }
+
+    .proj-list { max-height: 70vh; overflow:auto; }
+    .proj-row { border-bottom:1px solid #eee; padding:8px; }
+    .proj-top { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .proj-name { font-weight:600; }
+    .proj-name.archived { color:#999; text-decoration: line-through; }
+    .proj-ops { display:flex; gap:6px; align-items:center; }
+    .proj-status { display:flex; gap:6px; align-items:center; margin-top:6px; }
+    .proj-status select { padding:4px 6px; }
+    .muted { color:#777; }
+
+    table { border-collapse:collapse; width:100%; }
+    th, td { border:1px solid #ddd; padding:8px; text-align:center; font-size:14px; }
+    th { background:#f5f5f5; position:sticky; top:0; }
+    tr:hover { background:#fafafa; }
+
+    .fields { display:flex; gap:8px; margin-bottom:8px; }
+    .fields input[type=text]{ flex: 0 0 45%; padding:6px 8px; }
+    .fields textarea{ flex: 1; padding:6px 8px; height: 66px; }
+    button { cursor:pointer; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h2>项目管理</h2>
+
+  <div class="toolbar">
+    <input id="admin-token" type="text" placeholder="粘贴管理员 Bearer Token（可仅粘JWT或含 Bearer 前缀）">
+    <button id="save-token">保存</button>
+    <button id="refresh">刷新列表</button>
+  </div>
+  <div id="err"></div>
+
+  <div class="grid">
+    <!-- 左侧：项目列表 + 状态切换 -->
+    <div class="card">
+      <header>项目</header>
+      <div class="body">
+        <div class="fields">
+          <input id="new-proj-name" type="text" placeholder="项目名称">
+          <textarea id="new-proj-desc" placeholder="项目描述（可选）"></textarea>
+        </div>
+        <div>
+          <button id="create-proj">新建</button>
+        </div>
+
+        <div id="proj-list" class="proj-list" style="margin-top:8px;"></div>
+      </div>
+    </div>
+
+    <!-- 右侧：项目详情 -->
+    <div class="card">
+      <header id="proj-title">项目详情（未选择项目）</header>
+      <div class="body">
+        <div style="margin-top:10px;">
+          <table id="ts-table">
+            <thead>
+              <tr>
+                <th>ID</th><th>用户ID</th><th>日期</th><th>工时</th><th>备注</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const API_BASE = location.origin;
+  const tokenKey = 'admin_bearer_token';
+  const API = {
+    listProjects: () => `${API_BASE}/projects?all=1`,
+    createProject: () => `${API_BASE}/projects`,
+    deleteProject: (id) => `${API_BASE}/projects/${id}`,
+    projectDetail: (id) => `${API_BASE}/projects/${id}`,
+    setStatus: (id) => `${API_BASE}/projects/${id}/status`,
+  };
+
+  let projects = [];
+  let currentId = null;
+
+  window.addEventListener('error', e => showErr('脚本错误：' + (e.message || e.error)));
+  window.addEventListener('unhandledrejection', e => showErr('未处理异常：' + (e.reason && e.reason.stack || e.reason)));
+
+  document.addEventListener('DOMContentLoaded', () => {
+    byId('save-token').onclick = saveToken;
+    byId('refresh').onclick = loadProjects;
+    byId('create-proj').onclick = onCreate;
+
+    const t = localStorage.getItem(tokenKey);
+    if (t) byId('admin-token').value = t;
+
+    // 可以自动刷新一把（可按需注释）
+    // loadProjects();
+  });
+
+  function byId(id){ return document.getElementById(id); }
+  function showErr(msg){ console.error(msg); byId('err').textContent = String(msg||''); }
+  function clearErr(){ byId('err').textContent = ''; }
+  function getBearer(){
+    let t = (byId('admin-token').value || '').trim() || localStorage.getItem(tokenKey) || '';
+    if (!t) return '';
+    return t.startsWith('Bearer ') ? t : `Bearer ${t}`;
+  }
+  function saveToken(){
+    const raw = (byId('admin-token').value || '').trim();
+    if (!raw) return alert('请输入 token');
+    const t = raw.startsWith('Bearer ') ? raw.slice(7) : raw;
+    localStorage.setItem(tokenKey, t);
+    alert('已保存 token');
+  }
+
+  async function apiGet(url){
+    const bearer = getBearer(); if(!bearer) throw new Error('缺少管理员 token');
+    const res = await fetch(url, { headers:{'Authorization': bearer} });
+    if(!res.ok) throw new Error(`HTTP ${res.status} - ${await res.text()}`);
+    return res.json();
+  }
+  async function apiPost(url, body){
+    const bearer = getBearer(); if(!bearer) throw new Error('缺少管理员 token');
+    const res = await fetch(url, { method:'POST', headers:{'Authorization': bearer, 'Content-Type':'application/json'}, body: JSON.stringify(body||{}) });
+    if(!res.ok) throw new Error(`HTTP ${res.status} - ${await res.text()}`);
+    return res.json().catch(()=> ({}));
+  }
+  async function apiDelete(url){
+    const bearer = getBearer(); if(!bearer) throw new Error('缺少管理员 token');
+    const res = await fetch(url, { method:'DELETE', headers:{'Authorization': bearer} });
+    if(!res.ok) throw new Error(`HTTP ${res.status} - ${await res.text()}`);
+    return res.text().catch(()=> '');
+  }
+  async function apiPatch(url, body){
+    const bearer = getBearer(); if(!bearer) throw new Error('缺少管理员 token');
+    const res = await fetch(url, { method:'PATCH', headers:{'Authorization': bearer, 'Content-Type':'application/json'}, body: JSON.stringify(body||{}) });
+    if(!res.ok) throw new Error(`HTTP ${res.status} - ${await res.text()}`);
+    return res.json().catch(()=> ({}));
+  }
+
+  async function loadProjects(){
+    clearErr();
+    try{
+      projects = await apiGet(API.listProjects());
+      renderList();
+      if(projects.length && !currentId){
+        onSelect(projects[0].id);
+      }else if(currentId){
+        onSelect(currentId);
+      }
+    }catch(e){ showErr('加载失败：' + e.message); }
+  }
+
+  function renderList(){
+    const box = byId('proj-list');
+    box.innerHTML = '';
+    if(!projects.length){
+      box.innerHTML = `<div class="muted">暂无项目</div>`;
+      return;
+    }
+    projects.forEach(p=>{
+      const row = document.createElement('div');
+      row.className = 'proj-row';
+
+      const isArchived = (p.status === 'archived');
+      // 顶部行：项目名（计数） + 查看/删除
+      const top = document.createElement('div');
+      top.className = 'proj-top';
+      top.innerHTML = `
+        <div class="proj-name ${isArchived?'archived':''}">
+          ${escapeHtml(p.name)}（${p.timesheet_count||0}）
+          ${p.status ? `<span class="muted">[${p.status}]</span>` : ''}
+        </div>
+        <div class="proj-ops">
+          <button onclick="onSelect(${p.id})">查看</button>
+          <button onclick="onDelete(${p.id}, ${p.timesheet_count||0})" ${ (p.timesheet_count||0) > 0 ? 'disabled' : '' }>删除</button>
+        </div>
+      `;
+      // 状态控制：下拉 + 保存
+      const ctl = document.createElement('div');
+      ctl.className = 'proj-status';
+      ctl.innerHTML = `
+        <label>状态</label>
+        <select id="status-${p.id}">
+          <option value="active" ${p.status==='active'?'selected':''}>活跃</option>
+          <option value="archived" ${p.status==='archived'?'selected':''}>不活跃</option>
+        </select>
+        <button onclick="onSaveStatus(${p.id})">保存状态</button>
+      `;
+
+      row.appendChild(top);
+      row.appendChild(ctl);
+      box.appendChild(row);
+    });
+  }
+
+  async function onCreate(){
+    const name = (byId('new-proj-name').value || '').trim();
+    const description = (byId('new-proj-desc').value || '').trim();
+    if(!name) return alert('请输入项目名称');
+    try{
+      await apiPost(API.createProject(), {name, description});
+      byId('new-proj-name').value = '';
+      byId('new-proj-desc').value = '';
+      await loadProjects();
+    }catch(e){ showErr('创建项目失败：' + e.message); }
+  }
+
+  async function onDelete(id, count){
+    if(count > 0) return alert('该项目下还有工时记录，不能删除！');
+    if(!confirm('确认删除该项目？')) return;
+    try{
+      await apiDelete(API.deleteProject(id));
+      if(currentId === id){ currentId = null; renderDetail(null); }
+      await loadProjects();
+    }catch(e){ showErr('删除失败：' + e.message); }
+  }
+
+  async function onSaveStatus(id){
+    try{
+      const sel = byId(`status-${id}`);
+      if(!sel) return;
+      const status = sel.value;
+      await apiPatch(API.setStatus(id), { status });
+      await loadProjects(); // 刷新列表与右侧
+    }catch(e){ showErr('保存状态失败：' + e.message); }
+  }
+
+  async function onSelect(id){
+    currentId = id;
+    try{
+      const detail = await apiGet(API.projectDetail(id));
+      renderDetail(detail);
+      renderList(); // 更新选中态/状态文案
+    }catch(e){ showErr('加载项目详情失败：' + e.message); }
+  }
+
+  function renderDetail(detail){
+    const title = byId('proj-title');
+    const tbody = document.querySelector('#ts-table tbody');
+    tbody.innerHTML = '';
+    if(!detail){
+      title.textContent = '项目详情（未选择项目）';
+      tbody.innerHTML = `<tr><td colspan="5" class="muted">请选择左侧项目</td></tr>`;
+      return;
+    }
+    title.textContent = `项目：${detail.name}（ID: ${detail.id}）`;
+    const list = Array.isArray(detail.timesheets) ? detail.timesheets : [];
+    if(!list.length){
+      tbody.innerHTML = `<tr><td colspan="5" class="muted">该项目暂无工时</td></tr>`;
+      return;
+    }
+    list.forEach(t=>{
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${safe(t.id)}</td>
+        <td>${safe(t.user_id)}</td>
+        <td>${safe(t.date)}</td>
+        <td>${safe(t.hours)}</td>
+        <td>${safe(t.note)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function safe(v){ return (v===null||v===undefined)?'':String(v); }
+  function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+  window.onSelect = onSelect;
+  window.onDelete = onDelete;
+  window.onSaveStatus = onSaveStatus;
+</script>
+</body>
+</html>

@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>用户列表</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial; background:#fff; }
+    .wrap { width: 92%; margin: 20px auto; }
+    h2 { margin: 8px 0 16px; }
+    .toolbar { display:flex; gap:8px; align-items:center; margin-bottom:12px; }
+    .toolbar input[type=text]{ flex:1; padding:8px 10px; border:1px solid #ccc; border-radius:6px; }
+    .toolbar button { padding:8px 12px; cursor:pointer; border:1px solid #bbb; background:#f7f7f7; border-radius:6px; }
+    #err { color:#b00020; white-space:pre-wrap; font-size:12px; margin:6px 0 12px; min-height: 1em; }
+    table { border-collapse:collapse; width:100%; }
+    th, td { border:1px solid #ddd; padding:8px; text-align:center; font-size:14px; }
+    th { background:#f5f5f5; position:sticky; top:0; }
+    tr:hover { background:#fafafa; }
+    select, button.action { padding:4px 8px; font-size:13px; }
+    td.actions { white-space:nowrap; }
+    .muted { color:#777; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h2>用户列表</h2>
+
+    <div class="toolbar">
+      <input id="admin-token" type="text" placeholder="粘贴管理员 Bearer Token（可仅粘JWT本体或含 Bearer 前缀）">
+      <button id="save-token">保存</button>
+      <button id="refresh">刷新列表</button>
+    </div>
+    <div id="err"></div>
+
+    <table id="users-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>姓名</th>
+          <th>手机号</th>
+          <th>邮箱</th>
+          <th>角色</th>
+          <th>状态</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    // ====== 配置区（按需调整） ======
+    // 若静态页由 FastAPI 挂载在同源下，可用 location.origin；否则改成固定地址。
+    const API_BASE = location.origin; // 例如 http://localhost:8000
+    const tokenKey = 'admin_bearer_token';
+    // ==============================
+
+    // 五种状态选项（submitted 统一映射为 pending）
+    const STATUS_OPTIONS = [
+      {value:'first_come', text:'首次登录'},
+      {value:'pending',    text:'待审批'},
+      {value:'approved',   text:'已通过'},
+      {value:'rejected',   text:'已驳回'},
+      {value:'suspended',  text:'停用'},
+    ];
+
+    // 捕获未处理错误，避免“空白页”
+    window.addEventListener('error', (e) => showErr('脚本错误：' + (e.message || e.error)));
+    window.addEventListener('unhandledrejection', (e) => showErr('Promise 未处理异常：' + (e.reason && e.reason.stack || e.reason)));
+
+    document.addEventListener('DOMContentLoaded', () => {
+      byId('save-token').onclick = saveToken;
+      byId('refresh').onclick = loadUsers;
+
+      const t = localStorage.getItem(tokenKey);
+      if (t) byId('admin-token').value = t;
+
+      // 进入页面不自动刷新，避免没有 token 时报错；手动点“刷新列表”或保存后再刷新。
+    });
+
+    function byId(id){ return document.getElementById(id); }
+    function showErr(msg){
+      console.error('[users.html] ', msg);
+      byId('err').textContent = String(msg || '');
+    }
+    function clearErr(){ byId('err').textContent = ''; }
+
+    function getBearer() {
+      let t = (byId('admin-token').value || '').trim() || localStorage.getItem(tokenKey) || '';
+      if (!t) return '';
+      return t.startsWith('Bearer ') ? t : `Bearer ${t}`;
+    }
+    function saveToken(){
+      const raw = (byId('admin-token').value || '').trim();
+      if (!raw) return alert('请输入 token');
+      const t = raw.startsWith('Bearer ') ? raw.slice(7) : raw; // 存纯 token
+      localStorage.setItem(tokenKey, t);
+      alert('已保存 token');
+    }
+
+    async function loadUsers(){
+      clearErr();
+      const bearer = getBearer();
+      if (!bearer) return showErr('请先粘贴管理员 token');
+
+      const url = `${API_BASE}/users`;
+      console.log('[users.html] GET =>', url);
+
+      let res;
+      try {
+        res = await fetch(url, { headers: { 'Authorization': bearer } });
+      } catch (e) {
+        return showErr('网络错误：' + e);
+      }
+
+      if (!res.ok) {
+        const text = await res.text().catch(()=>'(无法读取响应文本)');
+        showErr(`请求失败：HTTP ${res.status}\n${text}`);
+        renderTable([]);
+        return;
+      }
+
+      let data;
+      try { data = await res.json(); }
+      catch (e) { return showErr('响应不是 JSON：' + e); }
+
+      console.log('[users.html] /users 响应 =>', data);
+
+      const users = normalizeUsers(data);
+      if (!Array.isArray(users)) {
+        showErr('后端返回结构不是数组，实际为：\n' + JSON.stringify(data, null, 2));
+        renderTable([]);
+        return;
+      }
+
+      renderTable(users);
+    }
+
+    // 适配常见分页字段
+    function normalizeUsers(payload){
+      if (Array.isArray(payload)) return payload;
+      if (payload && Array.isArray(payload.items)) return payload.items;
+      if (payload && Array.isArray(payload.data)) return payload.data;
+      if (payload && Array.isArray(payload.results)) return payload.results;
+      if (payload && Array.isArray(payload.records)) return payload.records;
+      return null;
+    }
+
+    function renderTable(users){
+      const tbody = document.querySelector('#users-table tbody');
+      tbody.innerHTML = '';
+
+      if (!users.length) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td colspan="7" class="muted">暂无数据</td>`;
+        tbody.appendChild(tr);
+        return;
+      }
+
+      users.forEach(u => {
+        const currStatus = (u.status ?? u.user_status ?? u.state ?? '').toString();
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${safe(u.id)}</td>
+          <td>${safe(u.name)}</td>
+          <td>${safe(u.mobile)}</td>
+          <td>${safe(u.email)}</td>
+          <td>${safe(u.role)}</td>
+          <td>
+            <select id="status-${u.id}">
+              ${STATUS_OPTIONS.map(opt => `
+                <option value="${opt.value}" ${opt.value===currStatus?'selected':''}>${opt.text}</option>
+              `).join('')}
+            </select>
+          </td>
+          <td class="actions">
+            <button class="action" onclick="saveStatus(${Number(u.id)})">保存状态</button>
+            <button class="action" onclick="approve(${Number(u.id)})">批准</button>
+            <button class="action" onclick="reject(${Number(u.id)})">驳回</button>
+            <button class="action" onclick="suspendUser(${Number(u.id)})">停用</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function safe(v){ return (v === null || v === undefined) ? '' : String(v); }
+
+    // --- 操作：保存状态（任意切换五态） ---
+    async function saveStatus(id){
+      clearErr();
+      const bearer = getBearer();
+      if (!bearer) return showErr('缺少管理员 token');
+
+      const sel = document.getElementById(`status-${id}`);
+      if (!sel) return showErr('未找到状态选择框');
+      const status = sel.value;
+
+      const url = `${API_BASE}/users/${id}/status`;
+      console.log('[users.html] PATCH =>', url, {status});
+
+      const res = await fetch(url, {
+        method: 'PATCH',
+        headers: { 'Authorization': bearer, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      }).catch(e => ({ ok:false, status:0, text: async()=> String(e) }));
+
+      if (!res.ok) {
+        const text = await res.text();
+        showErr(`保存状态失败：HTTP ${res.status}\n${text}`);
+      } else {
+        await loadUsers();
+      }
+    }
+
+    // --- 原有快捷操作（如果你路由命名不同可改 action 名） ---
+    async function callAction(userId, action, body){
+      clearErr();
+      const bearer = getBearer();
+      if (!bearer) return showErr('缺少管理员 token');
+
+      const url = `${API_BASE}/users/${userId}/${action}`;
+      console.log('[users.html] POST =>', url, body || {});
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': bearer,
+          ...(body ? {'Content-Type':'application/json'} : {})
+        },
+        body: body ? JSON.stringify(body) : undefined
+      }).catch(e => ({ ok:false, status:0, text: async()=> String(e) }));
+
+      if (!res.ok) {
+        const text = await res.text();
+        showErr(`${action} 失败：HTTP ${res.status}\n${text}`);
+      } else {
+        await loadUsers();
+      }
+    }
+
+    async function approve(id){ return callAction(id, 'approve'); }
+    async function reject(id){ return callAction(id, 'reject', {reason:'前端驳回示例'}); }
+    async function suspendUser(id){ return callAction(id, 'suspend'); }
+    window.saveStatus = saveStatus;
+    window.approve = approve;
+    window.reject = reject;
+    window.suspendUser = suspendUser;
+  </script>
+</body>
+</html>

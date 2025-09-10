@@ -1,0 +1,15 @@
+admin123 18800000000 eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZXhwIjoxNzU4OTU1NTY0fQ.l-n9BRwv7AfURTQOTVDjvGyUOByyPJMaMiQKVXX1sMU
+user123 18800000001 $2b$12$UqPCw5FgJQw.dznhNcB02.NK66zoEMWgbWnQkJ5zObddSaC7TBf6i
+
+curl -X POST http://localhost:8000/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"mobile": "18812345679", "password": "123456"}'
+
+winston2 18812345679 eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0IiwiZXhwIjoxNzU5MDM1OTY0fQ.X77y6yLZosED3wFtF9uhTVXs0eASViWP_OSWtUc3iuA
+curl http://localhost:8000/auth/me \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0IiwiZXhwIjoxNzU5MDM1OTY0fQ.X77y6yLZosED3wFtF9uhTVXs0eASViWP_OSWtUc3iuA"
+
+
+  curl -X POST http://127.0.0.1:8000/auth/login \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=18812345678&password=123456"

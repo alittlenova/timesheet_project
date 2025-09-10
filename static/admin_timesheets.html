@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>工时记录检索（管理员）</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
+    .wrap { max-width: 1100px; margin: 24px auto; padding: 0 12px; }
+    .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+    .row > * { margin: 4px 0; }
+    label { font-size: 14px; color: #444; }
+    input, select, button { padding: 6px 8px; font-size: 14px; }
+    .block { margin: 16px 0; }
+    .card { padding: 12px; border: 1px solid #e5e5e5; border-radius: 8px; background: #fff; }
+    .muted { color: #666; font-size: 13px; }
+    .error { color: #c62828; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px 10px; border: 1px solid #eee; text-align: center; font-size: 14px; }
+    thead th { background: #fafafa; }
+    .actions button{ margin: 0 4px; }
+    .badge { padding: 2px 6px; border-radius: 4px; font-size: 12px; display: inline-block; }
+    .badge.submitted { background: #fff7cc; color: #8a6d00; }
+    .badge.approved  { background: #d7ffd9; color: #136f19; }
+    .badge.rejected  { background: #ffd7d7; color: #8a0b0b; }
+    .hint { font-size: 12px; color: #888; }
+    .pill { padding: 4px 8px; border-radius: 999px; background: #f2f2f2; margin-right: 6px; display: inline-block; }
+    .right { text-align: right; }
+    .nowrap { white-space: nowrap; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h2>工时记录检索（管理员）</h2>
+
+  <!-- 连接 / 鉴权 -->
+  <div class="card block">
+    <div class="row">
+      <label>API 地址：
+        <input id="apiBase" value="http://localhost:8000" style="min-width:280px;" />
+      </label>
+      <label>Admin Token：
+        <input id="token" style="min-width:420px;" />
+      </label>
+      <button id="btnConnect">连接/校验</button>
+      <span id="authInfo" class="muted"></span>
+    </div>
+    <div class="hint">先在“管理员面板”或接口登录拿 token，粘贴到此处。仅 <b>admin</b> 可使用本页。</div>
+  </div>
+
+  <!-- 条件区（已去掉起止日期） -->
+  <div class="card block">
+    <div class="row">
+      <label>姓名（模糊）：<input id="qName" placeholder="留空=全员" /></label>
+      <label>状态：
+        <select id="qStatus">
+          <option value="">全部</option>
+          <option value="submitted">待审核</option>
+          <option value="approved">已通过</option>
+          <option value="rejected">已驳回</option>
+        </select>
+      </label>
+      <label>每页：
+        <select id="qSize">
+          <option>10</option><option selected>20</option><option>50</option><option>100</option>
+        </select>
+      </label>
+      <button id="btnSearch">检索</button>
+      <button id="btnClear">清空条件</button>
+    </div>
+    <div id="userPick" class="muted" style="display:none;margin-top:8px;"></div>
+  </div>
+
+  <!-- 结果 / 操作 -->
+  <div class="card block">
+    <div class="row" style="justify-content: space-between;">
+      <div>
+        <button id="btnDeleteSelected" disabled>删除已勾选</button>
+        <span class="hint">（不可恢复，请谨慎操作）</span>
+      </div>
+      <div class="right">
+        <button id="btnPrev" disabled>上一页</button>
+        <span class="pill" id="pageInfo">第 1 / 1 页</span>
+        <button id="btnNext" disabled>下一页</button>
+      </div>
+    </div>
+
+    <div id="resultWrap" class="block">
+      <table>
+        <thead>
+        <tr>
+          <th><input type="checkbox" id="checkAll" /></th>
+          <th>ID</th>
+          <th>用户ID</th>
+          <th class="nowrap">提交时间</th>
+          <th>工时(小时)</th>
+          <th>项目ID</th>
+          <th>昵称</th>
+          <th>本周完成情况</th>
+          <th>备注</th>
+          <th>状态</th>
+          <th>操作</th>
+        </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div id="emptyHint" class="muted" style="display:none;padding:12px;text-align:center;">无记录</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const $ = (id) => document.getElementById(id);
+
+  let apiBase = $('apiBase').value.trim();
+  let token = '';
+  let me = null;          // 当前登录用户（admin）
+  let selectedUserId = null; // 选中的用户（按姓名匹配后选择）
+  let page = 1;
+  let totalPages = 1;
+
+  // 事件绑定
+  $('btnConnect').onclick = connect;
+  $('btnSearch').onclick = search;
+  $('btnClear').onclick = () => {
+    $('qName').value = '';
+    $('qStatus').value = '';
+    $('qSize').value = '20';
+    selectedUserId = null;
+    $('userPick').style.display = 'none';
+    page = 1;
+    renderEmpty();
+  };
+  $('btnPrev').onclick = () => { if (page > 1) { page--; fetchTimesheets(); } };
+  $('btnNext').onclick = () => { if (page < totalPages) { page++; fetchTimesheets(); } };
+  $('btnDeleteSelected').onclick = deleteSelected;
+  $('checkAll').onchange = function() {
+    document.querySelectorAll('tbody input[type=checkbox].rowCheck').forEach(cb => cb.checked = this.checked);
+    toggleBulkBtn();
+  };
+
+  // fetch 包装
+  async function api(path, opts = {}) {
+    const url = (apiBase.replace(/\/$/, '') + path);
+    const headers = Object.assign({}, opts.headers || {}, { 'Authorization': 'Bearer ' + token });
+    if (opts.json) {
+      headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(opts.json);
+      delete opts.json;
+    }
+    const res = await fetch(url, Object.assign({}, opts, { headers }));
+    if (!res.ok) {
+      let msg = 'HTTP ' + res.status;
+      try { const j = await res.json(); if (j.detail) msg = j.detail; } catch {}
+      throw new Error(msg);
+    }
+    if (res.status === 204) return null;
+    const ct = res.headers.get('content-type') || '';
+    return ct.includes('application/json') ? res.json() : res.text();
+  }
+
+  // 连接/鉴权
+  async function connect() {
+    try {
+      apiBase = $('apiBase').value.trim();
+      token = $('token').value.trim();
+      if (!apiBase || !token) {
+        alert('请填写 API 地址与 admin token');
+        return;
+      }
+      const info = await api('/auth/me');
+      if (!info || info.role !== 'admin') {
+        throw new Error('仅 admin 可使用本页（当前角色：' + (info?.role || '未知') + '）');
+      }
+      me = info;
+      $('authInfo').innerHTML = '已连接：' + me.name + '（' + me.role + '）';
+      alert('鉴权通过');
+    } catch (e) {
+      $('authInfo').innerHTML = '';
+      me = null;
+      alert('连接/校验失败： ' + e.message);
+    }
+  }
+
+  // 搜索
+  async function search() {
+    if (!me) { alert('请先连接并通过 admin 鉴权'); return; }
+    page = 1;
+    selectedUserId = null;
+    $('userPick').style.display = 'none';
+
+    const name = $('qName').value.trim();
+    if (name) {
+      // 先拉用户列表，在前端做模糊匹配
+      try {
+        const users = await api('/users/');
+        const cand = users.filter(u => (u.name || '').toLowerCase().includes(name.toLowerCase()));
+        if (cand.length === 0) {
+          alert('未找到匹配的用户');
+          return;
+        } else if (cand.length === 1) {
+          selectedUserId = cand[0].id;
+          $('userPick').style.display = 'block';
+          $('userPick').innerHTML = '已选择用户：' + cand[0].name + '（ID ' + cand[0].id + '）';
+          await fetchTimesheets();
+        } else {
+          // 让管理员挑一个
+          const pick = $('userPick');
+          pick.style.display = 'block';
+          pick.innerHTML = '匹配到多个用户：' + cand.map(u =>
+            `<a href="#" data-uid="${u.id}" style="margin-right:10px;">${u.name}(ID ${u.id})</a>`).join('');
+          pick.querySelectorAll('a[data-uid]').forEach(a => {
+            a.onclick = (e) => {
+              e.preventDefault();
+              selectedUserId = parseInt(a.dataset.uid, 10);
+              pick.innerHTML = '已选择用户：' + a.textContent;
+              fetchTimesheets();
+            }
+          });
+        }
+      } catch (e) {
+        alert('拉取用户失败：' + e.message);
+      }
+    } else {
+      // 全员（仅按状态）
+      await fetchTimesheets();
+    }
+  }
+
+  // 拉取工时（服务端分页）—— 已移除 from/to
+  async function fetchTimesheets() {
+    try {
+      renderLoading();
+      const params = new URLSearchParams();
+      params.set('page', String(page));
+      params.set('size', String(parseInt($('qSize').value, 10) || 20));
+      const status = $('qStatus').value;
+      if (selectedUserId) params.set('user_id', String(selectedUserId));
+      if (status) params.set('status', status);
+
+      const data = await api('/timesheets?' + params.toString());
+      renderTable(data);
+    } catch (e) {
+      renderEmpty();
+      alert('检索失败：' + e.message);
+    }
+  }
+
+  // 删除单条
+  async function deleteOne(id) {
+    if (!confirm('确定删除记录 #' + id + ' ? 操作不可恢复。')) return;
+    try {
+      await api('/timesheets/' + id, { method: 'DELETE' });
+      await fetchTimesheets();
+    } catch (e) {
+      alert('删除失败：' + e.message);
+    }
+  }
+
+  // 批量删除
+  async function deleteSelected() {
+    const ids = Array.from(document.querySelectorAll('tbody input.rowCheck:checked'))
+      .map(cb => parseInt(cb.dataset.id, 10));
+    if (ids.length === 0) return;
+    if (!confirm('确定删除选中的 ' + ids.length + ' 条记录？操作不可恢复。')) return;
+    try {
+      for (const id of ids) {
+        await api('/timesheets/' + id, { method: 'DELETE' });
+      }
+      await fetchTimesheets();
+    } catch (e) {
+      alert('批量删除失败：' + e.message);
+    }
+  }
+
+  // 渲染
+  function renderLoading() {
+    $('tbody').innerHTML = `<tr><td colspan="11" class="muted">加载中…</td></tr>`;
+    $('emptyHint').style.display = 'none';
+    $('btnPrev').disabled = true;
+    $('btnNext').disabled = true;
+    $('btnDeleteSelected').disabled = true;
+    $('checkAll').checked = false;
+  }
+
+  function renderEmpty() {
+    $('tbody').innerHTML = '';
+    $('emptyHint').style.display = 'block';
+    $('pageInfo').textContent = '第 1 / 1 页';
+    $('btnPrev').disabled = true;
+    $('btnNext').disabled = true;
+    $('btnDeleteSelected').disabled = true;
+    $('checkAll').checked = false;
+  }
+
+  function toggleBulkBtn() {
+    const any = document.querySelector('tbody input.rowCheck:checked');
+    $('btnDeleteSelected').disabled = !any;
+  }
+
+  function renderTable(pg) {
+    const tb = $('tbody');
+    tb.innerHTML = '';
+    if (!pg || !pg.items || pg.items.length === 0) {
+      renderEmpty();
+      return;
+    }
+    const rows = pg.items.map(ts => {
+      const badgeCls = 'badge ' + (ts.status || '').toLowerCase();
+
+      // 新结构：submit_time / hours / 项目 / 昵称 / 周报说明 / 备注 等
+      const submitTime = ts.submit_time || '';
+      const hours = (ts.hours || 0).toFixed(2);
+      const project = ts.project_id ?? '-';
+      const nickname = ts.nickname || '';
+      const weekly = ts.weekly_summary || '';
+      const note = ts.note || '';
+
+      return `
+        <tr>
+          <td><input type="checkbox" class="rowCheck" data-id="${ts.id}"></td>
+          <td>${ts.id}</td>
+          <td>${ts.user_id}</td>
+          <td class="nowrap">${escapeHtml(submitTime)}</td>
+          <td>${hours}</td>
+          <td>${project}</td>
+          <td>${escapeHtml(nickname)}</td>
+          <td>${escapeHtml(weekly)}</td>
+          <td>${escapeHtml(note)}</td>
+          <td><span class="${badgeCls}">${ts.status}</span></td>
+          <td class="actions">
+            <button data-del="${ts.id}">删除</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+    tb.innerHTML = rows;
+    $('emptyHint').style.display = 'none';
+
+    // 事件绑定
+    tb.querySelectorAll('button[data-del]').forEach(btn => {
+      btn.onclick = () => deleteOne(parseInt(btn.dataset.del, 10));
+    });
+    tb.querySelectorAll('input.rowCheck').forEach(cb => {
+      cb.onchange = () => toggleBulkBtn();
+    });
+
+    // 分页控件
+    page = pg.page;
+    totalPages = Math.max(1, Math.ceil(pg.total / pg.size));
+    $('pageInfo').textContent = `第 ${page} / ${totalPages} 页（共 ${pg.total} 条）`;
+    $('btnPrev').disabled = page <= 1;
+    $('btnNext').disabled = page >= totalPages;
+
+    // 批量按钮
+    $('checkAll').checked = false;
+    $('btnDeleteSelected').disabled = true;
+  }
+
+  function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+})();
+</script>
+</body>
+</html>
