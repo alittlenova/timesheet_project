@@ -1,5 +1,6 @@
 // frontend/src/main.jsx  —— 直接整文件替换
 
+import "./shim-api-rewrite";
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
