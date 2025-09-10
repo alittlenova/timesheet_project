@@ -312,22 +312,32 @@ export default function AdminTimesheetsPage() {
   };
 
   // ===== 登录 / 登出 =====
-  const handleLogin = async () => {
-    try {
-      const res = await api.post("/auth/login", loginForm);
-      const { token: tokenStr, user } = res.data as { token: string; user: LoggedInUser };
-
-      if (user.role !== "manager" && user.role !== "admin") {
-        alert("无权限：仅经理或管理员可访问该页面");
-        return;
-      }
-      setMe(user);
-      setToken(tokenStr);
-      localStorage.setItem("admintoken", tokenStr);
-    } catch (err: any) {
-      alert("登录失败：" + (err.response?.data?.detail || err.message));
+const handleLogin = async () => {
+  try {
+    console.log('[LOGIN] click', loginForm);
+    const r = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(loginForm),
+    });
+    if (!r.ok) {
+      const t = await r.text().catch(()=> '');
+      throw new Error(`HTTP ${r.status} ${t}`);
     }
-  };
+    const { token: tokenStr, user } = await r.json();
+
+    if (user.role !== "manager" && user.role !== "admin") {
+      alert("无权限：仅经理或管理员可访问该页面");
+      return;
+    }
+    setMe(user);
+    setToken(tokenStr);
+    localStorage.setItem("admintoken", tokenStr);
+  } catch (err:any) {
+    alert("登录失败：" + (err?.message || err));
+  }
+};
+
 
   const handleLogout = () => {
     setToken("");
@@ -503,7 +513,7 @@ export default function AdminTimesheetsPage() {
                 onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
               />
             </div>
-            <Button onClick={handleLogin}>登录</Button>
+            <Button type="button" onClick={handleLogin}>登录</Button>
           </CardContent>
         </Card>
       </div>
