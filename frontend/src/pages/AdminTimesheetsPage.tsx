@@ -281,7 +281,7 @@ export default function AdminTimesheetsPage() {
   const fetchTimesheets = async () => {
     if (!selectedUserId) return;
     try {
-      const res = await api.get<PageResp>("/timesheets/", {
+      const res = await api.get<PageResp>("/timesheets", {
         params: {
           page,
           size: PAGE_SIZE,
@@ -336,7 +336,7 @@ export default function AdminTimesheetsPage() {
       return;
     }
     try {
-      const res = await api.post("/timesheets/bulk_approve/", null, {
+      const res = await api.post("/timesheets/bulk_approve", null, {
         params: { user_id: selectedUserId },
       });
       alert(`已通过 ${res.data.approved} 条待审核记录`);
@@ -351,7 +351,7 @@ export default function AdminTimesheetsPage() {
     if (me?.role !== "admin") return; // 保险
     if (!confirm("确认要通过所有可见用户的全部待审核记录吗？")) return;
     try {
-      const res = await api.post("/timesheets/bulk_approve/");
+      const res = await api.post("/timesheets/bulk_approve");
       alert(`已通过 ${res.data.approved} 条待审核记录`);
       await fetchUsersAndCounts();
       await fetchTimesheets();
