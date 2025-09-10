@@ -156,6 +156,19 @@ def list_timesheets(
     items = q.offset((page - 1) * size).limit(size).all()
     return {"items": items, "page": page, "size": size, "total": total}
 
+@router.get("", response_model=TimesheetPage, include_in_schema=False)
+def list_timesheets_noslash(
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    user_id: Optional[int] = None,
+    project_id: Optional[int] = None,
+    status: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=200),
+):
+    return list_timesheets(db=db, user=user, user_id=user_id,
+                           project_id=project_id, status=status,
+                           page=page, size=size)
 
 # ========== 删除 ==========
 @router.delete("/{ts_id}")
