@@ -297,7 +297,7 @@ export default function AdminTimesheetsPage() {
   const fetchTimesheets = async () => {
     if (!selectedUserId) return;
     try {
-      const res = await api.get<PageResp>("/timesheets", {
+      const res = await api.get<PageResp>("/timesheets/", {
         params: {
           page,
           size: PAGE_SIZE,
