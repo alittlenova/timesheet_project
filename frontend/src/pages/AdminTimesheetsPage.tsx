@@ -70,7 +70,7 @@ type Project = { id: number; name: string; status?: string };
 
 // ── Axios：固定走 https 绝对地址，避免任何相对/改写带来的混合内容
 const api = axios.create({
-  baseURL: "https://wentian.wang/api",
+  baseURL: "/api/",
   timeout: 15000,
 });
 
@@ -192,7 +192,7 @@ export default function AdminTimesheetsPage() {
 
   // ===== 可见性：返回集合，避免竞态 =====
   const loadVisibility = async (): Promise<Set<number> | null> => {
-    const meRes = await api.get<LoggedInUser>("/auth/me");
+    const meRes = await api.get<LoggedInUser>("auth/me");
     const meUser = meRes.data;
     setMe(meUser);
 
@@ -202,11 +202,11 @@ export default function AdminTimesheetsPage() {
     }
 
     if (meUser.role === "manager") {
-      const deptList = await api.get<{ id: number; name: string }[]>("/departments/");
+      const deptList = await api.get<{ id: number; name: string }[]>("departments/");
       const visible = new Set<number>();
       for (const d of deptList.data) {
         const detail = await api.get<{ id: number; name: string; users: User[] }>(
-          `/departments/${d.id}`
+          `departments/${d.id}`
         );
         const usersInDept = detail.data.users || [];
         if (usersInDept.some((u) => u.id === meUser.id)) {
@@ -228,7 +228,7 @@ export default function AdminTimesheetsPage() {
     try {
       const [uRes, cRes] = await Promise.all([
         api.get<User[]>("/users/"),
-        api.get<{ user_id: number; count: number }[]>("/timesheets/counts/", {
+        api.get<{ user_id: number; count: number }[]>("timesheets/counts/", {
           params: { status: "submitted" },
         }),
       ]);
@@ -258,7 +258,7 @@ export default function AdminTimesheetsPage() {
   // ===== 项目列表（编辑下拉用） =====
   const fetchProjects = async () => {
     try {
-      const res = await api.get<Project[]>("/projects/");
+      const res = await api.get<Project[]>("projects/");
       const actives = res.data.filter((p) => !p.status || p.status === "active");
       actives.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
       setProjects(actives);
@@ -336,7 +336,7 @@ export default function AdminTimesheetsPage() {
       return;
     }
     try {
-      const res = await api.post("/timesheets/bulk_approve", null, {
+      const res = await api.post("timesheets/bulk_approve", null, {
         params: { user_id: selectedUserId },
       });
       alert(`已通过 ${res.data.approved} 条待审核记录`);
@@ -351,7 +351,7 @@ export default function AdminTimesheetsPage() {
     if (me?.role !== "admin") return; // 保险
     if (!confirm("确认要通过所有可见用户的全部待审核记录吗？")) return;
     try {
-      const res = await api.post("/timesheets/bulk_approve");
+      const res = await api.post("timesheets/bulk_approve");
       alert(`已通过 ${res.data.approved} 条待审核记录`);
       await fetchUsersAndCounts();
       await fetchTimesheets();
@@ -363,7 +363,7 @@ export default function AdminTimesheetsPage() {
   // ===== 单条通过 / 驳回（单条动作：不带末尾斜杠） =====
   const handleApproveOne = async (id: number) => {
     try {
-      await api.post(`/timesheets/${id}/approve`);
+      await api.post(`timesheets/${id}/approve`);
       await fetchUsersAndCounts();
       await fetchTimesheets();
     } catch (err: any) {
@@ -373,7 +373,7 @@ export default function AdminTimesheetsPage() {
 
   const handleRejectOne = async (id: number) => {
     try {
-      await api.post(`/timesheets/${id}/reject`);
+      await api.post(`timesheets/${id}/reject`);
       await fetchUsersAndCounts();
       await fetchTimesheets();
     } catch (err: any) {
@@ -446,7 +446,7 @@ export default function AdminTimesheetsPage() {
         return;
       }
 
-      await api.put(`/timesheets/${ts.id}`, body);
+      await api.put(`timesheets/${ts.id}`, body);
       setEditingId(null);
       await fetchTimesheets();
     } catch (err: any) {
