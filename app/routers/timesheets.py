@@ -1,6 +1,6 @@
 # app/routers/timesheets.py
 from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import Optional
+from typing import Optional, List
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -9,16 +9,21 @@ from .. import models
 from ..schemas import TimesheetCreate, TimesheetOut, TimesheetPage
 from ..security import get_current_user
 
-router = APIRouter()
+# 统一前缀：/timesheets
+router = APIRouter(prefix="/timesheets", tags=["timesheets"])
+
+# --- 兼容旧路径：/timesheet_counts（可选） ---
+legacy_router = APIRouter(tags=["timesheets-legacy"])
+
 
 # ========== 新增 ==========
-@router.post("/timesheets", response_model=TimesheetOut)
+@router.post("/", response_model=TimesheetOut)
 def create_timesheet(
     body: TimesheetCreate,
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    # 直接使用前端传入的小时数；做合理性校验（可按需调整上限）
+    # 仅用前端传来的工时数（float）
     hours = float(body.hours or 0)
     if hours <= 0 or hours > 1000:
         raise HTTPException(status_code=400, detail="工时数必须在 0~1000 之间")
@@ -27,7 +32,7 @@ def create_timesheet(
         user_id=user.id,
         project_id=body.project_id,
 
-        # 新字段（全部字符串，可为 None/空串）
+        # —— 业务新增字段（全部字符串，可为空）——
         submit_time=body.submit_time,
         fill_id=body.fill_id,
         answer_time=body.answer_time,
@@ -43,7 +48,7 @@ def create_timesheet(
         group_reduce_hours=body.group_reduce_hours,
         reason_desc=body.reason_desc,
 
-        # 数值/杂项
+        # —— 数值/杂项 —— 
         hours=hours,
         overtime=bool(body.overtime) if body.overtime is not None else False,
         note=body.note,
@@ -60,7 +65,7 @@ def create_timesheet(
 
 
 # ========== 更新 ==========
-@router.put("/timesheets/{ts_id}", response_model=TimesheetOut)
+@router.put("/{ts_id}", response_model=TimesheetOut)
 def update_timesheet(
     ts_id: int,
     body: TimesheetCreate,
@@ -71,7 +76,7 @@ def update_timesheet(
     if not ts:
         raise HTTPException(status_code=404, detail="Not found")
 
-    # 权限与可编辑状态限制：员工只能改自己的，且仅能改 submitted
+    # 权限/状态限制：员工仅能改自己的 submitted
     if user.role == "employee":
         if ts.user_id != user.id:
             raise HTTPException(status_code=403, detail="No permission")
@@ -107,7 +112,7 @@ def update_timesheet(
     ts.geo_lat = body.geo_lat
     ts.geo_lng = body.geo_lng
 
-    # 员工修改后，状态回到待审核
+    # 员工修改后，自动回到待审核
     if user.role == "employee":
         ts.status = "submitted"
 
@@ -117,7 +122,7 @@ def update_timesheet(
 
 
 # ========== 列表 ==========
-@router.get("/timesheets", response_model=TimesheetPage)
+@router.get("/", response_model=TimesheetPage)
 def list_timesheets(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
@@ -129,7 +134,7 @@ def list_timesheets(
 ):
     q = db.query(models.Timesheet)
 
-    # 权限过滤：员工仅看自己的；管理/管理员可选 user_id，不填则看全部
+    # 员工仅看自己的；经理/管理员可查看指定 user_id 或全员
     if user.role == "employee":
         q = q.filter(models.Timesheet.user_id == user.id)
     elif user.role in ["manager", "admin"] and user_id:
@@ -142,7 +147,7 @@ def list_timesheets(
 
     total = q.count()
 
-    # 新排序：按创建时间倒序，其次按 id 倒序
+    # 按创建时间倒序，其次 id 倒序
     q = q.order_by(
         models.Timesheet.created_at.desc(),
         models.Timesheet.id.desc(),
@@ -153,7 +158,7 @@ def list_timesheets(
 
 
 # ========== 删除 ==========
-@router.delete("/timesheets/{ts_id}")
+@router.delete("/{ts_id}")
 def delete_timesheet(
     ts_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)
 ):
@@ -161,7 +166,6 @@ def delete_timesheet(
     if not ts:
         raise HTTPException(status_code=404, detail="Not found")
 
-    # 员工只能删自己的
     if user.role == "employee" and ts.user_id != user.id:
         raise HTTPException(status_code=403, detail="No permission")
 
@@ -171,7 +175,7 @@ def delete_timesheet(
 
 
 # ========== 审批 ==========
-@router.post("/timesheets/{ts_id}/approve")
+@router.post("/{ts_id}/approve")
 def approve_timesheet(
     ts_id: int,
     db: Session = Depends(get_db),
@@ -187,7 +191,7 @@ def approve_timesheet(
     return {"ok": True}
 
 
-@router.post("/timesheets/{ts_id}/reject")
+@router.post("/{ts_id}/reject")
 def reject_timesheet(
     ts_id: int,
     db: Session = Depends(get_db),
@@ -203,9 +207,8 @@ def reject_timesheet(
     return {"ok": True}
 
 
-
 # ========== 统计 ==========
-@router.get("/timesheets/counts")
+@router.get("/counts")
 def timesheet_counts(
     status: Optional[str] = Query(None, description="submitted/approved/rejected"),
     db: Session = Depends(get_db),
@@ -218,8 +221,7 @@ def timesheet_counts(
       {"user_id": 2, "count": 0},
       ...
     ]
-    员工：只能看自己的。
-    经理/管理员：看全员。
+    员工：只能看自己的；经理/管理员：全员。
     """
     q = db.query(
         models.Timesheet.user_id, func.count(models.Timesheet.id).label("count")
@@ -235,30 +237,13 @@ def timesheet_counts(
     return [{"user_id": uid, "count": cnt} for (uid, cnt) in rows]
 
 
-# 兼容旧路径
-@router.get("/timesheet_counts")
-def timesheet_counts_alias(
-    status: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
-    user=Depends(get_current_user),
-):
-    return timesheet_counts(status=status, db=db, user=user)
-
-
 # ========== 批量通过 ==========
-@router.post("/timesheets/bulk_approve")
+@router.post("/bulk_approve")
 def bulk_approve_timesheets(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
     user_id: Optional[int] = Query(None, description="仅审批该用户的待审核；不传则审批全员"),
 ):
-    """
-    批量将 submitted -> approved。
-    - 仅 manager / admin 可用
-    - user_id 为空：全员所有待审核记录
-      user_id 有值：仅该用户的待审核记录
-    返回 {"approved": 受影响条数}
-    """
     if user.role not in ["manager", "admin"]:
         raise HTTPException(status_code=403, detail="无权限")
 
@@ -269,3 +254,13 @@ def bulk_approve_timesheets(
     affected = q.update({models.Timesheet.status: "approved"}, synchronize_session=False)
     db.commit()
     return {"approved": int(affected)}
+
+
+# ===== 旧地址：/timesheet_counts（可选保留） =====
+@legacy_router.get("/timesheet_counts")
+def timesheet_counts_alias(
+    status: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    return timesheet_counts(status=status, db=db, user=user)
