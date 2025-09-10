@@ -20,7 +20,7 @@
   <div class="toolbar">
     <div>
       <label>API 地址：
-        <input id="apiBase" value="http://localhost:8000" style="width:280px" />
+        <input id="apiBase" value="http://127.0.0.1:8000" style="width:280px" />
       </label>
       <label>Admin Token：
         <input id="token" placeholder="eyJhbGciOi..." style="width:420px" />
@@ -71,7 +71,7 @@
   <script>
     // ====== 状态 ======
     let state = {
-      apiBase: 'http://localhost:8000',
+      apiBase: 'http://127.0.0.1:8000',
       token: '',
       me: null,          // /auth/me
       users: [],
@@ -84,7 +84,7 @@
       const qsApi = url.searchParams.get('apiBase');
       const qsTok = url.searchParams.get('token');
 
-      const savedApi = qsApi || localStorage.getItem('admin_apiBase') || 'http://localhost:8000';
+      const savedApi = qsApi || localStorage.getItem('admin_apiBase') || 'http://127.0.0.1:8000';
       const savedTok = qsTok || localStorage.getItem('admin_token') || '';
 
       state.apiBase = savedApi;

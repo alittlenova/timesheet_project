@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     jwt_expires_minutes: int = 60
 
     # ----- DB -----
-    mysql_host: str = "localhost"   # 在 docker 内建议用 "db"（compose 服务名）
+    mysql_host: str = "127.0.0.1"   # 在 docker 内建议用 "db"（compose 服务名）
     mysql_port: int = 3306
     mysql_user: str = "root"
     mysql_password: str = "rootpass"
