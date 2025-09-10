@@ -12,7 +12,7 @@ type Row = {
 };
 
 //const api = axios.create({ baseURL: "http://localhost:8000" });
-const api = axios.create({ baseURL: "http://49.235.107.96:8000" });
+const api = axios.create({ baseURL: "/api" });
 
 export default function AdminSummaryPage() {
   const [token, setToken] = useState("");

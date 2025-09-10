@@ -67,7 +67,7 @@ type PageResp = {
 type Project = { id: number; name: string; status?: string };
 
 //const api = axios.create({ baseURL: "http://localhost:8000" });
-const api = axios.create({ baseURL: "http://49.235.107.96:8000" });
+const api = axios.create({ baseURL: "/api" });
 
 export default function AdminTimesheetsPage() {
   // 登录

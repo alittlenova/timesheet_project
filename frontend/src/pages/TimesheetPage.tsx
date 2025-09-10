@@ -56,7 +56,7 @@ type PageData = {
 
 // 所有请求打到 FastAPI:8000
 //const api = axios.create({ baseURL: "http://localhost:8000" });
-const api = axios.create({ baseURL: "http://49.235.107.96:8000" });
+const api = axios.create({ baseURL: "/api" });
 
 export default function TimesheetPage() {
   const [token, setToken] = useState('')
