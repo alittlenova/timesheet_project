@@ -26,7 +26,7 @@ class WechatLoginIn(BaseModel):
 class WechatRegisterIn(BaseModel):
     user_id: int
     name: str
-    phone: str
+    motile: str
 
     @field_validator("name")
     @classmethod
@@ -122,7 +122,7 @@ def get_or_create_user_by_openid(db: Session, openid: str) -> User:
 
 
 def _phone_in_use(db: Session, phone: str, exclude_user_id: int | None = None) -> bool:
-    conds = [or_(User.phone == phone, User.mobile == phone)]
+    conds = [User.mobile == phone]
     if exclude_user_id:
       conds.append(User.id != exclude_user_id)
     stmt = select(exists().where(*conds))
@@ -145,7 +145,7 @@ async def wechat_login(body: WechatLoginIn):
         user = get_or_create_user_by_openid(s, openid)
 
         # 守卫：若缺姓名/手机号，则置为 first_come
-        if (not user.name or user.name.strip() == "" or user.name == "WeChatUser") or (not user.phone and not user.mobile):
+        if (not user.name or user.name.strip() == "" or user.name == "WeChatUser") or (not user.mobile):
             if user.status not in ("first_come", "rejected"):
                 user.status = "first_come"
                 user.is_active = False
@@ -194,7 +194,6 @@ def wechat_register(body: WechatRegisterIn, db: Session = Depends(get_db)):
             raise HTTPException(400, "Phone already used")
 
         user.name = body.name.strip()
-        user.phone = body.phone.strip()
         user.mobile = body.phone.strip()     # 兼容历史 mobile 字段
         user.status = "pending"
         user.is_active = False

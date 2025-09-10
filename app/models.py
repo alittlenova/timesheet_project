@@ -51,7 +51,7 @@ class User(Base):
     mobile = Column(String(20), unique=True, nullable=True)
 
     # ✅ 数据库已存在，但模型缺失的列
-    phone = Column(String(20), unique=True, nullable=True)
+    mobile = Column(String(20), unique=True, nullable=True)
 
     email = Column(String(128), nullable=True)
 

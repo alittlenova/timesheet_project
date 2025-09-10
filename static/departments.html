@@ -260,7 +260,7 @@
 
     const filtered = allUsers.filter(u => {
       if(!keyword) return true;
-      const s = `${u.id} ${u.name||''} ${u.mobile||''} ${u.phone||''} ${u.email||''}`.toLowerCase();
+      const s = `${u.id} ${u.name||''} ${u.mobile||''} ${u.email||''}`.toLowerCase();
       return s.includes(keyword);
     });
 
@@ -275,7 +275,7 @@
       const checked = inDeptIds.has(Number(u.id)) ? 'checked' : '';
       div.innerHTML = `
         <input type="checkbox" id="pick-${u.id}" ${checked}>
-        <label for="pick-${u.id}">#${u.id} ${escapeHtml(u.name||'')}  ${escapeHtml(u.mobile||u.phone||'')}  ${escapeHtml(u.email||'')}</label>
+        <label for="pick-${u.id}">#${u.id} ${escapeHtml(u.name||'')}  ${escapeHtml(u.mobile||'')}  ${escapeHtml(u.email||'')}</label>
       `;
       picker.appendChild(div);
     });
@@ -330,7 +330,7 @@
       tr.innerHTML = `
         <td>${safe(u.id)}</td>
         <td>${safe(u.name)}</td>
-        <td>${safe(u.mobile||u.phone)}</td>
+        <td>${safe(u.mobile)}</td>
         <td>${safe(u.email)}</td>
         <td>${safe(u.role)}</td>
         <td>${safe(u.status)}</td>
