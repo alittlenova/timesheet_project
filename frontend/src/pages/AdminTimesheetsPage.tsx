@@ -1,3 +1,5 @@
+// AdminTimesheetsPage.tsx（替换整文件）
+
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { Card, CardContent } from "@/components/ui/card";
@@ -33,7 +35,7 @@ type Timesheet = {
   user_id: number;
   project_id: number | null;
 
-  // ✅ 新结构：无 work_date/start_time/end_time，只保留 hours + 一堆字符串
+  // 新结构：仅 hours + 扩展字符串
   hours: number;
   note?: string | null;
 
@@ -66,34 +68,24 @@ type PageResp = {
 
 type Project = { id: number; name: string; status?: string };
 
-//const api = axios.create({ baseURL: "http://localhost:8000" });
+// ── Axios：固定走 https 绝对地址，避免任何相对/改写带来的混合内容
 const api = axios.create({
-  baseURL: 'https://wentian.wang/api',        // 关键！走同域反代
-  withCredentials: true,  // 若用 Cookie 登录
+  baseURL: "https://wentian.wang/api",
   timeout: 15000,
 });
 
-// 1) 绝对地址 -> 统一改相对地址 /api
-const FORCE_BASE = '/api';
-
-function toRelative(u: string) {
-  // 把 http://localhost:8000/xxx、http://127.0.0.1:8000/xxx、http(s)://任意域/xxx
-  // 一律改成 /api/xxx
-  const m = u.match(/^https?:\/\/[^/]+(\/.*)$/i);
-  return m ? (FORCE_BASE + m[1].replace(/^\/api\/?/, '/'))  // 防止重复 /api/api
-           : u.startsWith('/api') ? u : (FORCE_BASE + (u.startsWith('/') ? u : `/${u}`));
-}
-
 api.interceptors.request.use((cfg) => {
-  // 可视化日志（调试期保留，稳定后可删除）
-  console.log('[REQ]', cfg.method?.toUpperCase(), (cfg.baseURL||'')+(cfg.url||''));
+  console.log("[REQ]", cfg.method?.toUpperCase(), `${cfg.baseURL ?? ""}${cfg.url ?? ""}`, cfg.params || "");
   return cfg;
 });
 api.interceptors.response.use(
-  (res) => { console.log('[RES]', res.status, (res.config.baseURL||'')+(res.config.url||'')); return res; },
+  (res) => {
+    console.log("[RES]", res.status, `${res.config.baseURL ?? ""}${res.config.url ?? ""}`);
+    return res;
+  },
   (err) => {
     const cfg = err.config || {};
-    console.error('[ERR]', (cfg.baseURL||'')+(cfg.url||''), err.message);
+    console.error("[ERR]", `${cfg.baseURL ?? ""}${cfg.url ?? ""}`, err.message);
     return Promise.reject(err);
   }
 );
@@ -121,7 +113,7 @@ export default function AdminTimesheetsPage() {
   const [page, setPage] = useState(1);
   const [pageData, setPageData] = useState<PageResp | null>(null);
 
-  // 编辑态（✅ 改为新字段）
+  // 编辑态
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState({
     hours: "",
@@ -231,7 +223,7 @@ export default function AdminTimesheetsPage() {
     return v;
   };
 
-  // ===== 用户 & 待审计数（接收可见集合，避免竞态） =====
+  // ===== 用户 & 待审计数 =====
   const fetchUsersAndCounts = async (visible?: Set<number> | null) => {
     try {
       const [uRes, cRes] = await Promise.all([
@@ -304,32 +296,32 @@ export default function AdminTimesheetsPage() {
   };
 
   // ===== 登录 / 登出 =====
-const handleLogin = async () => {
-  try {
-    console.log('[LOGIN] click', loginForm);
-    const r = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(loginForm),
-    });
-    if (!r.ok) {
-      const t = await r.text().catch(()=> '');
-      throw new Error(`HTTP ${r.status} ${t}`);
-    }
-    const { token: tokenStr, user } = await r.json();
+  const handleLogin = async () => {
+    try {
+      console.log("[LOGIN] click", loginForm);
+      // 同域 /admin 页面，直接走 /api 相对地址（浏览器会补成 https://wentian.wang/api/...）
+      const r = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(loginForm),
+      });
+      if (!r.ok) {
+        const t = await r.text().catch(() => "");
+        throw new Error(`HTTP ${r.status} ${t}`);
+      }
+      const { token: tokenStr, user } = await r.json();
 
-    if (user.role !== "manager" && user.role !== "admin") {
-      alert("无权限：仅经理或管理员可访问该页面");
-      return;
+      if (user.role !== "manager" && user.role !== "admin") {
+        alert("无权限：仅经理或管理员可访问该页面");
+        return;
+      }
+      setMe(user);
+      setToken(tokenStr);
+      localStorage.setItem("admintoken", tokenStr);
+    } catch (err: any) {
+      alert("登录失败：" + (err?.message || err));
     }
-    setMe(user);
-    setToken(tokenStr);
-    localStorage.setItem("admintoken", tokenStr);
-  } catch (err:any) {
-    alert("登录失败：" + (err?.message || err));
-  }
-};
-
+  };
 
   const handleLogout = () => {
     setToken("");
@@ -368,10 +360,10 @@ const handleLogin = async () => {
     }
   };
 
-  // ===== 单条通过 / 驳回 =====
+  // ===== 单条通过 / 驳回（单条动作：不带末尾斜杠） =====
   const handleApproveOne = async (id: number) => {
     try {
-      await api.post(`/timesheets/${id}/approve/`);
+      await api.post(`/timesheets/${id}/approve`);
       await fetchUsersAndCounts();
       await fetchTimesheets();
     } catch (err: any) {
@@ -381,7 +373,7 @@ const handleLogin = async () => {
 
   const handleRejectOne = async (id: number) => {
     try {
-      await api.post(`/timesheets/${id}/reject/`);
+      await api.post(`/timesheets/${id}/reject`);
       await fetchUsersAndCounts();
       await fetchTimesheets();
     } catch (err: any) {
@@ -428,7 +420,6 @@ const handleLogin = async () => {
   const saveEdit = async (ts: Timesheet) => {
     try {
       const body = {
-        // 新版 TimesheetCreate 需要的字段：与后端 schemas 对齐
         project_id: editForm.project_id ? parseInt(editForm.project_id, 10) : null,
         hours: parseFloat(editForm.hours || "0"),
 
@@ -600,7 +591,7 @@ const handleLogin = async () => {
         </CardContent>
       </Card>
 
-      {/* 下：该用户的工时列表 + 筛选 + 分页（含编辑/审批） */}
+      {/* 下：工时列表 */}
       <Card>
         <CardContent className="p-4 space-y-3">
           <div className="flex items-center gap-3">
@@ -724,8 +715,6 @@ const handleLogin = async () => {
                         <div className="text-sm text-gray-700 mt-1 space-y-1">
                           <div>项目：{projName}{ts.project_id ? `（ID:${ts.project_id}）` : ""}</div>
                           {ts.note && <div>备注：{ts.note}</div>}
-
-                          {/* 常用信息简单展示（避免过长页面，可按需裁剪） */}
                           {ts.nickname && <div>昵称：{ts.nickname}</div>}
                           {ts.weekly_summary && <div>本周完成情况：{ts.weekly_summary}</div>}
                           {(ts.pm_reduce_hours || ts.director_reduce_hours || ts.group_reduce_hours) && (
@@ -736,7 +725,7 @@ const handleLogin = async () => {
                         </div>
                       ) : (
                         <div className="grid grid-cols-2 gap-3 mt-2 text-sm">
-                          {/* 左侧：基本项 */}
+                          {/* 基本项 */}
                           <div className="col-span-2 grid grid-cols-2 gap-3">
                             <div>
                               <Label>工时数（小时）</Label>
@@ -776,7 +765,7 @@ const handleLogin = async () => {
                             </div>
                           </div>
 
-                          {/* 右/下：扩展字符串字段（常用的放前面） */}
+                          {/* 扩展字符串字段 */}
                           <div>
                             <Label>昵称</Label>
                             <Input
