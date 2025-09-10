@@ -1,14 +1,17 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + React</title>
+    <title>Timesheet</title>
   </head>
   <body>
     <div id="root"></div>
+
+    <!-- 先加载补丁，拦截所有 fetch / XHR -->
     <script src="/rewrite-api.js"></script>
+
+    <!-- 再加载你的应用入口（保持你原来的路径） -->
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
