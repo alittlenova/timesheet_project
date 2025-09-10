@@ -1,9 +1,9 @@
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, Field, AliasChoices, ConfigDict
 from sqlalchemy.orm import Session
 import httpx, logging, re
 from typing import Optional
-from sqlalchemy import select, exists, or_
+from sqlalchemy import select, exists, or_, and_
 
 from ..config import settings
 from ..security import create_token
@@ -17,6 +17,7 @@ router = APIRouter()
 # 如需强制开发模式（永远使用假 openid），设为 True
 FORCE_WECHAT_DEV = False
 DEFAULT_DEPT_ID = 1
+
 # ---------- 请求体 ----------
 
 class WechatLoginIn(BaseModel):
@@ -26,7 +27,11 @@ class WechatLoginIn(BaseModel):
 class WechatRegisterIn(BaseModel):
     user_id: int
     name: str
-    motile: str
+    # 统一使用 mobile；兼容历史字段名 "phone"
+    mobile: str = Field(..., validation_alias=AliasChoices("mobile", "phone"))
+
+    # 允许用别名字段进行赋值（配合上面的 validation_alias）
+    model_config = ConfigDict(populate_by_name=True)
 
     @field_validator("name")
     @classmethod
@@ -35,13 +40,13 @@ class WechatRegisterIn(BaseModel):
             raise ValueError("name required")
         return v.strip()
 
-    @field_validator("phone")
+    @field_validator("mobile")
     @classmethod
-    def phone_is_valid(cls, v: str):
+    def mobile_is_valid(cls, v: str):
         v = v.strip()
         # 可根据需要替换为更严格的手机号校验
         if not re.fullmatch(r"[0-9+\-()\s]{6,20}", v):
-            raise ValueError("invalid phone")
+            raise ValueError("invalid mobile")
         return v
 
 # ---------- WeChat 交互 ----------
@@ -122,10 +127,14 @@ def get_or_create_user_by_openid(db: Session, openid: str) -> User:
 
 
 def _phone_in_use(db: Session, phone: str, exclude_user_id: int | None = None) -> bool:
-    conds = [User.mobile == phone]
+    """
+    历史命名保留：检查“手机号是否被占用”。
+    现在统一用 users.mobile 列。
+    """
+    cond = User.mobile == phone
     if exclude_user_id:
-      conds.append(User.id != exclude_user_id)
-    stmt = select(exists().where(*conds))
+        cond = and_(cond, User.id != exclude_user_id)
+    stmt = select(exists().where(cond))
     return db.execute(stmt).scalar()
 
 # ---------- 路由 ----------
@@ -189,12 +198,12 @@ def wechat_register(body: WechatRegisterIn, db: Session = Depends(get_db)):
         if user.status not in ("first_come", "rejected"):
             raise HTTPException(400, "Already submitted or approved")
 
-        # 手机号唯一：phone & mobile 两列都检查/占位
-        if _phone_in_use(db, body.phone, exclude_user_id=user.id):
+        # 手机号唯一：统一检查/占位到 users.mobile
+        if _phone_in_use(db, body.mobile, exclude_user_id=user.id):
             raise HTTPException(400, "Phone already used")
 
         user.name = body.name.strip()
-        user.mobile = body.phone.strip()     # 兼容历史 mobile 字段
+        user.mobile = body.mobile.strip()
         user.status = "pending"
         user.is_active = False
 
