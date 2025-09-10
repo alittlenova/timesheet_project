@@ -244,7 +244,7 @@ export default function AdminTimesheetsPage() {
     try {
       const [uRes, cRes] = await Promise.all([
         api.get<User[]>("/users/"),
-        api.get<{ user_id: number; count: number }[]>("/timesheets/counts", {
+        api.get<{ user_id: number; count: number }[]>("/timesheets/counts/", {
           params: { status: "submitted" },
         }),
       ]);
@@ -352,7 +352,7 @@ const handleLogin = async () => {
       return;
     }
     try {
-      const res = await api.post("/timesheets/bulk_approve", null, {
+      const res = await api.post("/timesheets/bulk_approve/", null, {
         params: { user_id: selectedUserId },
       });
       alert(`已通过 ${res.data.approved} 条待审核记录`);
@@ -367,7 +367,7 @@ const handleLogin = async () => {
     if (me?.role !== "admin") return; // 保险
     if (!confirm("确认要通过所有可见用户的全部待审核记录吗？")) return;
     try {
-      const res = await api.post("/timesheets/bulk_approve");
+      const res = await api.post("/timesheets/bulk_approve/");
       alert(`已通过 ${res.data.approved} 条待审核记录`);
       await fetchUsersAndCounts();
       await fetchTimesheets();
@@ -379,7 +379,7 @@ const handleLogin = async () => {
   // ===== 单条通过 / 驳回 =====
   const handleApproveOne = async (id: number) => {
     try {
-      await api.post(`/timesheets/${id}/approve`);
+      await api.post(`/timesheets/${id}/approve/`);
       await fetchUsersAndCounts();
       await fetchTimesheets();
     } catch (err: any) {
@@ -389,7 +389,7 @@ const handleLogin = async () => {
 
   const handleRejectOne = async (id: number) => {
     try {
-      await api.post(`/timesheets/${id}/reject`);
+      await api.post(`/timesheets/${id}/reject/`);
       await fetchUsersAndCounts();
       await fetchTimesheets();
     } catch (err: any) {
