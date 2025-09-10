@@ -26,7 +26,44 @@ type Me = {
 type Department = { id: number; name: string };
 
 //const api = axios.create({ baseURL: "http://localhost:8000" });
-const api = axios.create({ baseURL: "/api" });
+const api = axios.create({
+  baseURL: '/api',        // 关键！走同域反代
+  withCredentials: true,  // 若用 Cookie 登录
+  timeout: 15000,
+});
+
+// 1) 绝对地址 -> 统一改相对地址 /api
+const FORCE_BASE = '/api';
+
+function toRelative(u: string) {
+  // 把 http://localhost:8000/xxx、http://127.0.0.1:8000/xxx、http(s)://任意域/xxx
+  // 一律改成 /api/xxx
+  const m = u.match(/^https?:\/\/[^/]+(\/.*)$/i);
+  return m ? (FORCE_BASE + m[1].replace(/^\/api\/?/, '/'))  // 防止重复 /api/api
+           : u.startsWith('/api') ? u : (FORCE_BASE + (u.startsWith('/') ? u : `/${u}`));
+}
+
+api.interceptors.request.use((cfg) => {
+  // 确保 baseURL 恒为 /api
+  cfg.baseURL = FORCE_BASE;
+
+  // 把任何绝对 URL 改写成相对路径（从而走同域反代）
+  if (cfg.url) {
+    cfg.url = toRelative(cfg.url);
+  }
+
+  // 可视化日志（调试期保留，稳定后可删除）
+  console.log('[REQ]', cfg.method?.toUpperCase(), (cfg.baseURL||'')+(cfg.url||''));
+  return cfg;
+});
+api.interceptors.response.use(
+  (res) => { console.log('[RES]', res.status, (res.config.baseURL||'')+(res.config.url||'')); return res; },
+  (err) => {
+    const cfg = err.config || {};
+    console.error('[ERR]', (cfg.baseURL||'')+(cfg.url||''), err.message);
+    return Promise.reject(err);
+  }
+);
 
 /** 行组件：每个待审批用户一行（把 hooks 放进子组件，避免在 map 中直接用 hooks） */
 function PendingRow(props: {
