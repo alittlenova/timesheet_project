@@ -85,14 +85,6 @@ function toRelative(u: string) {
 }
 
 api.interceptors.request.use((cfg) => {
-  // 确保 baseURL 恒为 /api
-  cfg.baseURL = FORCE_BASE;
-
-  // 把任何绝对 URL 改写成相对路径（从而走同域反代）
-  if (cfg.url) {
-    cfg.url = toRelative(cfg.url);
-  }
-
   // 可视化日志（调试期保留，稳定后可删除）
   console.log('[REQ]', cfg.method?.toUpperCase(), (cfg.baseURL||'')+(cfg.url||''));
   return cfg;
